@@ -1,5 +1,6 @@
 package game2048;
 
+import java.util.Arrays;
 import java.util.Formatter;
 import java.util.Observable;
 
@@ -113,14 +114,70 @@ public class Model extends Observable {
         // TODO: Modify this.board (and perhaps this.score) to account
         // for the tilt to the Side SIDE. If the board changed, set the
         // changed local variable to true.
+        int[][] board0 = boardjudgement();//record all the values of current board
 
+        board.setViewingPerspective(side);
+        for(int c = 0; c < this.board.size(); c += 1){
+            tiltC_UpTrickyMerge(c);
+        }
+        board.setViewingPerspective(Side.NORTH);
+
+        int[][] board1 = boardjudgement();
+        if(!Arrays.deepEquals(board0, board1)){//!!!! deepEquals to compare 2d array
+            changed = true;
+        }
         checkGameOver();
         if (changed) {
             setChanged();
         }
         return changed;
     }
-
+    private int[][] boardjudgement(){
+        int[][] boardvalue = new int[this.board.size()][this.board.size()];
+        for(int c = 0; c < this.board.size(); c += 1){
+            for(int r = 0; r < this.board.size(); r += 1){
+                if(this.board.tile(c, r) != null){
+                    boardvalue[c][r] = this.board.tile(c, r).value();
+                }else{
+                    boardvalue[c][r] = 0;
+                }
+            }
+        }
+        return boardvalue;
+    }
+    private void tiltC_UpNoMerge(int column){
+        for(int r = this.board.size() - 2; r >= 0; r -= 1){
+            Tile t = this.board.tile(column, r);
+            if(t == null){
+                continue;
+            }
+            for(int rup = r + 1; rup <= this.board.size() - 1; rup += 1){
+                Tile tup = this.board.tile(column, rup);
+                if(rup == 3 && tup == null){
+                    this.board.move(column, rup, t);
+                }
+                if(tup != null){
+                    this.board.move(column, rup - 1, t);
+                    break;
+                }
+            }
+        }
+    }
+    private void tiltC_UpTrickyMerge(int column){
+        tiltC_UpNoMerge(column);
+        for(int r = this.board.size() - 2; r >= 0; r -= 1){
+            Tile t = this.board.tile(column, r);
+            if(t == null){
+                break;
+            }
+            Tile tup = this.board.tile(column, r + 1);
+            if(t.value() == tup.value()){
+                this.board.move(column, r + 1, t);
+                score += board.tile(column, r + 1).value();
+                tiltC_UpNoMerge(column); //amazing place to solve the rule 2
+            }
+        }
+    }
     /** Checks if the game is over and sets the gameOver variable
      *  appropriately.
      */
@@ -138,6 +195,13 @@ public class Model extends Observable {
      * */
     public static boolean emptySpaceExists(Board b) {
         // TODO: Fill in this function.
+        for(int c = 0; c < b.size(); c += 1){
+            for(int r = 0; r < b.size(); r += 1){
+                if(b.tile(c, r) == null){
+                    return true;
+                }
+            }
+        }
         return false;
     }
 
@@ -148,6 +212,13 @@ public class Model extends Observable {
      */
     public static boolean maxTileExists(Board b) {
         // TODO: Fill in this function.
+        for(int c = 0; c < b.size(); c += 1){
+            for(int r = 0; r < b.size(); r += 1){
+                if(b.tile(c, r) != null && b.tile(c, r).value() == MAX_PIECE){
+                    return true;
+                }
+            }
+        }
         return false;
     }
 
@@ -159,6 +230,23 @@ public class Model extends Observable {
      */
     public static boolean atLeastOneMoveExists(Board b) {
         // TODO: Fill in this function.
+        if(emptySpaceExists(b)){
+            return true;
+        }
+        for(int c = 0; c < b.size(); c += 1){
+            for(int r = 0; r < b.size() - 1; r += 1){
+                if(b.tile(c, r).value() == b.tile(c, r + 1).value()){
+                    return true;
+                }
+            }
+        }
+        for(int r = 0; r < b.size(); r += 1){
+            for(int c = 0; c < b.size() - 1; c += 1){
+                if(b.tile(c, r).value() == b.tile(c + 1, r).value()){
+                    return true;
+                }
+            }
+        }
         return false;
     }
 

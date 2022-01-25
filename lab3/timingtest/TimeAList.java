@@ -20,8 +20,23 @@ public class TimeAList {
     public static void main(String[] args) {
         timeAListConstruction();
     }
-
+    //int[] N = {1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000};
     public static void timeAListConstruction() {
         // TODO: YOUR CODE HERE
+        AList<Integer> N = new AList<>();
+        N.addLast(1000);
+        AList<Double> timeInSeconds = new AList<>();
+        for(int i = 0; i < 8; i++){
+            if(i != 0){
+                N.addLast(2*N.get(i-1));
+            }
+            AList<Integer> List = new AList<>();
+            Stopwatch sw = new Stopwatch();
+            for(int j = 0; j < N.get(i); j++){
+                List.addLast(1);
+            }
+            timeInSeconds.addLast(sw.elapsedTime());
+        }
+        printTimingTable(N, timeInSeconds, N);
     }
 }
