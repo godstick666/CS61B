@@ -1,0 +1,22 @@
+Random:100k, 500k, 1m, 5m strings of length 10.
+MyHashMap        : 0.14s, 0.45s, 0.93s, 7.87s;
+Built-in HashMap : 0.04s, 0.26s, 0.36s, 7.28s;
+
+Order:100k, 500k, 1m
+MyHashMap        : 0.13s, 0.61s, 3.90s;
+Built-in HashMap : 0.04s, 0.20s, 0.88s;
+
+BSTMap vs. HashMap
+Keys in order makes key-value pairs in uniform distribution using HashMap,
+while it makes BSTMap spindly and takes more time to search items.
+
+
+Random:100k, 500k, 1m, 5m strings of length 10.
+ArrayList     : 0.28s, 0.70s, 0.93s, 5.11s;
+LinkedList    : 0.10s, 0.41s, 1.03s, 6.09s;
+TreeSet       : 0.15s, 0.61s, 0.96s, 5.44s;
+PriorityQueue : 0.12s, 1.92s, 1.28s, 6.72s;
+HashSet       : 0.22s, 1.37s, 0.93s, 6.09s;
+
+Hash table would speed up if we were able to use a logarithmic search over the TreeSet
+or a constant-time search over the HashSet as a result of bucket using keys' order.
