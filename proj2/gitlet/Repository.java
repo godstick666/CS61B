@@ -1,6 +1,10 @@
 package gitlet;
 
 import java.io.File;
+import java.io.Serializable;
+import java.text.SimpleDateFormat;
+import java.util.*;
+
 import static gitlet.Utils.*;
 
 // TODO: any imports you need here
@@ -9,9 +13,9 @@ import static gitlet.Utils.*;
  *  TODO: It's a good idea to give a description here of what else this Class
  *  does at a high level.
  *
- *  @author TODO
+ *  @author Xinpeng WU
  */
-public class Repository {
+public class Repository implements Serializable {
     /**
      * TODO: add instance variables here.
      *
@@ -24,6 +28,410 @@ public class Repository {
     public static final File CWD = new File(System.getProperty("user.dir"));
     /** The .gitlet directory. */
     public static final File GITLET_DIR = join(CWD, ".gitlet");
+    /** The staging area in .gitlet */
+    public static final File STAGING_AREA = join(GITLET_DIR, "stagingArea");
+    public static final File ADDEDFILES = join(GITLET_DIR, ".addedfiles");
+    public static final File REMOVEDFILES = join(GITLET_DIR, ".removedfiles");
+    /** The commits stored path */
+    public static final File COMMITS = join(GITLET_DIR, "commits");
+    /** The commits' tree */
+    public static final File COMMITS_TREE = join(COMMITS, "tree");
+    /** The master pointer stored path */
+    public static final File HEAD = join(GITLET_DIR, "HEAD");
+    /** The blobs stored path */
+    public static final File BLOBS = join(GITLET_DIR, "blobs");
 
-    /* TODO: fill in the rest of this class. */
+    /** Creates a new Gitlet version-control system in the current directory.
+     *  This system will automatically start with one commit: a commit that contains no files
+     *  and has the commit message initial commit (just like that, with no punctuation).
+     *  It will have a single branch: master, which initially points to this initial commit,
+     *  and master will be the current branch. The timestamp for this initial commit will be
+     *  00:00:00 UTC, Thursday, 1 January 1970 in whatever format you choose for dates
+     *  (this is called “The (Unix) Epoch”, represented internally by the time 0.) Since the
+     *  initial commit in all repositories created by Gitlet will have exactly the same content,
+     *  it follows that all repositories will automatically share this commit (they will all have
+     *  the same UID) and all commits in all repositories will trace back to it.
+     *  Failure cases :
+     *  If there is already a Gitlet version-control system in the current directory, it should abort.
+     *  It should NOT overwrite the existing system with a new one. Should print the error message
+     *  "A Gitlet version-control system already exists in the current directory." */
+    public static void init (){
+        if (GITLET_DIR.exists()){
+            System.out.println("A Gitlet version-control system already exists in the current directory.");
+            return;
+        }// failure cases
+        GITLET_DIR.mkdir();
+        STAGING_AREA.mkdir();
+        COMMITS.mkdir();
+        BLOBS.mkdir();
+        Commit initial = new Commit ("initial commit");
+        storeNewCommit(initial);
+    }
+    /** return the map mapping added files with their hashID */
+    private static Map<String, String> getAddedFiles(){
+        Map<String, String> addedFiles = ADDEDFILES.exists() ?
+                readObject(ADDEDFILES, TreeMap.class) : new TreeMap<>();
+        return addedFiles;
+    }
+    /** return the set that contains removed files' name */
+    private static SortedSet<String> getRemovedFiles(){
+        SortedSet<String> removedFiles = ADDEDFILES.exists() ?
+                readObject(ADDEDFILES, TreeSet.class) : new TreeSet<>();
+        return removedFiles;
+    }
+    /** return the commit tree that store commitID's prefix and suffix */
+    private static Map<String, LinkedList<String>> getCommitsTree(){
+        Map<String, LinkedList<String>> commitsTree = COMMITS_TREE.exists() ?
+                readObject(COMMITS_TREE, TreeMap.class) : new TreeMap<>();
+        return commitsTree;
+    }
+    /** Adds a copy of the file as it currently exists to the staging area
+     * (see the description of the commit command). For this reason, adding
+     * a file is also called staging the file for addition. Staging an
+     * already-staged file overwrites the previous entry in the staging area
+     * with the new contents. The staging area should be somewhere in .gitlet.
+     * If the current working version of the file is identical to the version
+     * in the current commit, do not stage it to be added, and remove it from
+     * the staging area if it is already there (as can happen when a file is
+     * changed, added, and then changed back to it’s original version). The
+     * file will no longer be staged for removal (see gitlet rm), if it was
+     * at the time of the command. 
+     * ATTENTION: Significant modification, add addedFiles object to record Relative
+     * Paths file name with its SHA1 ID. */
+    public static void add (String source){
+        File sourceFile = join(CWD, source);
+        if (!sourceFile.isFile() || !sourceFile.exists()) {
+            System.out.println("File does not exist.");
+            return;
+        }// failure cases
+        byte[] sourceFileContents = readContents(sourceFile);
+        String sourceFileID = sha1(sourceFileContents);
+        String committedFileID = getHeadCommit().getBlobs().get(source);
+        Map<String, String> addedFiles = getAddedFiles();
+        String stagedFileID = addedFiles.get(source);
+        File stagedFile = join(STAGING_AREA, stagedFileID);
+        if (sourceFileID.equals(committedFileID)){
+            // using SHA1 to determine whether source is identical to current commit file
+            if (stagedFile.exists()){
+                addedFiles.remove(source);
+                restrictedDelete(stagedFile);
+                writeObject(ADDEDFILES, (Serializable) addedFiles);
+            }
+        }else {
+            if (!sourceFileID.equals(stagedFileID)){
+                if (stagedFile.exists()){ restrictedDelete(stagedFile);}
+                addedFiles.put(source, sourceFileID);
+                File destFile = join(ADDEDFILES, sourceFileID);
+                writeContents(destFile, sourceFileContents); //copy the file to specific file path
+                writeObject(ADDEDFILES, (Serializable) addedFiles);
+            }
+        }
+    }
+
+    /** Saves a snapshot of tracked files in the current commit and staging area,
+     * so they can be restored at a later time, creating a new commit. The commit
+     * is said to be tracking the saved files. By default, each commit’s snapshot
+     * of files will be exactly the same as its parent commit’s snapshot of files;
+     * it will keep versions of files exactly as they are, and not update them. A
+     * commit will only update the contents of files it is tracking that have been
+     * staged for addition at the time of commit, in which case the commit will now
+     * include the version of the file that was staged instead of the version it
+     * got from its parent. A commit will save and start tracking any files that
+     * were staged for addition but weren’t tracked by its parent. Finally, files
+     * tracked in the current commit may be untracked in the new commit as a result
+     * being staged for removal by the rm command (below).
+     * The bottom line: By default a commit has the same file contents as its parent.
+     * Files staged for addition and removal are the updates to the commit. Of course,
+     * the date (and likely the mesage) will also different from the parent.*/
+    public static void commit(String message){
+        Map<String, String> addedFiles = getAddedFiles();
+        SortedSet<String> removedFiles = getRemovedFiles();
+        if (addedFiles.isEmpty() && removedFiles.isEmpty()){
+            System.out.println("No changes added to the commit.");
+            System.exit(0);
+        }
+        Commit headCommit = getHeadCommit();
+        // read from my computer the HEAD commit object and the staging area
+        Commit newCommit = new Commit (message, readContentsAsString(HEAD));
+        newCommit.setBlobs(new TreeMap<>(headCommit.getBlobs()));
+        // clone the HEAD commit's blobs
+
+        for (Map.Entry<String, String> entry : addedFiles.entrySet()){
+            String key = entry.getKey(); String value = entry.getValue();
+            newCommit.getBlobs().put(key, value);
+            File sourceFile = join(STAGING_AREA, value);
+            File destFile = join(BLOBS, value);
+            writeContents(destFile, readContents(sourceFile));
+            restrictedDelete(sourceFile);
+        }
+        for (String removedFile : removedFiles){
+            newCommit.getBlobs().remove(removedFile);
+        }
+        storeNewCommit(newCommit);
+        restrictedDelete(ADDEDFILES);
+        restrictedDelete(REMOVEDFILES);
+        // using the staging area to modify the files tracked by new commit
+        // write back any new object made or any modified object read earlier
+    }
+
+    /** Unstage the file if it is currently staged for addition. If the file is
+     * tracked in the current commit, stage it for removal and remove the file
+     * from the working directory if the user has not already done so (do not
+     * remove it unless it is tracked in the current commit).*/
+    public static void remove(String target){
+        Map<String, String> addedFiles = getAddedFiles();
+        SortedSet<String> removedFiles = getRemovedFiles();
+        File sourceFile = join(CWD, target);
+        String addedFileID = addedFiles.get(target);
+        if (addedFileID != null) {
+            addedFiles.remove(target);
+            writeObject(ADDEDFILES, (Serializable) addedFiles);
+            File addedFile = join(STAGING_AREA, addedFileID);
+            restrictedDelete(addedFile);
+        }else if (getHeadCommit().getBlobs().containsKey(target)){
+            removedFiles.add(target);
+            writeObject(REMOVEDFILES, (Serializable) removedFiles);
+            if (sourceFile.exists()) { restrictedDelete(sourceFile); }
+        }else {
+            System.out.println("No reason to remove the file.");
+            System.exit(0);
+        }
+    }
+    /** Starting at the current head commit, display information about each commit
+     * backwards along the commit tree until the initial commit, following the first
+     * parent commit links, ignoring any second parents found in merge commits.
+     * (In regular Git, this is what you get with git log --first-parent). This set
+     * of commit nodes is called the commit’s history. For every node in this history,
+     * the information it should display is the commit id, the time the commit was made,
+     * and the commit message. Here is an example of the exact format it should follow:
+     * */
+    public static void log(){
+        SimpleDateFormat sdf = printLogStyleSet();
+        String commitID = readContentsAsString(HEAD); Commit commit;
+        while (true){
+            commit = getCommit(commitID);
+            printLogInfo(commitID, commit, sdf);
+            if (commit.getParents().isEmpty()){ break; } // current commit is initial commit
+            commitID = commit.getParents().get(0);
+        }
+    }
+
+    private static SimpleDateFormat printLogStyleSet(){
+        SimpleDateFormat sdf = new SimpleDateFormat("E MMM d HH:mm:ss y, z", Locale.US);
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return sdf;
+    }
+
+    private static void printLogInfo(String commitID, Commit commit, SimpleDateFormat sdf){
+        System.out.println("===");
+        if (commit.getParents().size() == 1){
+            System.out.println("commit " + commitID);
+        }
+        if(commit.getParents().size() >= 2){
+            System.out.println("Merge: ");
+            for (String str : commit.getParents()){
+                System.out.print(str.substring(0, 8) + "  ");
+            }
+        }
+        System.out.println("Date:");
+        System.out.print(sdf.format(commit.getTimestamp()));
+        System.out.println(commit.getMessage());
+        System.out.println();
+    }
+
+    /** Like log, except displays information about all commits ever made.
+     * The order of the commits does not matter. Hint: there is a useful method in 
+     * gitlet.Utils that will help you iterate over files within a directory. */
+    public static void globalLog(){
+        SimpleDateFormat sdf = printLogStyleSet();
+//        for (String commitID : plainFilenamesIn(COMMITS)){
+//            printLogInfo(commitID, getCommit(commitID), sdf);
+//        }
+        Map<String, LinkedList<String>> commitsTree = getCommitsTree();
+        for (Map.Entry<String, LinkedList<String>> entry : commitsTree.entrySet()){
+            for (String UIDsuffix : entry.getValue()){
+                String UID = entry.getKey() + UIDsuffix;
+                printLogInfo(UID, getCommit(UID), sdf);
+            }
+        }         
+    }
+    /** Prints out the ids of all commits that have the given commit message, one per
+     *  line. If there are multiple such commits, it prints the ids out on separate
+     *  lines. The commit message is a single operand; to indicate a multiword message,
+     *  put the operand in quotation marks, as for the commit command below.
+     *  Failure cases: If no such commit exists, prints the error message Found no commit
+     *  with that message.*/
+    public static void find(String commitMsg){
+        boolean suchCommitsExit = false;
+        for (String commitID : plainFilenamesIn(COMMITS)){
+            Commit commit = getCommit(commitID);
+            if (commit.getMessage().equals(commitMsg)){
+                System.out.println(commitID);
+                suchCommitsExit = true;
+            }
+        }
+        if (suchCommitsExit){
+            System.out.println("Found no commit with that message.");
+        }
+    }
+    /** Displays what branches currently exist, and marks the current branch
+     *  with a *. Also displays what files have been staged for addition or
+     *  removal.
+     *  A file in the working directory is “modified but not staged” if it is     *
+     *      1. Tracked in the current commit, changed in the working directory, but not staged; or
+     *      2. Staged for addition, but with different contents than in the working directory; or
+     *      3. Staged for addition, but deleted in the working directory; or
+     *      4. Not staged for removal, but tracked in the current commit and deleted from the working directory.
+     * The final category (“Untracked Files”) is for files present in the working directory
+     *      but neither staged for addition nor tracked. This includes files that have been staged
+     *      for removal, but then re-created without Gitlet’s knowledge. Ignore any subdirectories
+     *      that may have been introduced, since Gitlet does not deal with them.*/
+    public static void status(){
+        System.out.println("=== Branches ===");
+        // for branch in branches
+        //  if branch is current branch
+        //     System.out.print("*");
+        //  System.out.println(branch's name);
+        System.out.println("=== Staged Files ===");
+        Map<String, String> addedFiles = getAddedFiles();
+        addedFiles.keySet().forEach(System.out::println);
+        System.out.println();
+        System.out.println("=== Removed Files ===");
+        SortedSet<String> removedFiles = getRemovedFiles();
+        removedFiles.forEach(System.out::println);
+        System.out.println();
+        System.out.println("=== Modifications Not Staged For Commit ===");
+        List<SortedSet<String>> res = iterateWorkingDIRFiles();
+        res.get(0).forEach(System.out::println);
+        System.out.println();
+        System.out.println("=== Untracked Files ===");
+        res.get(1).forEach(System.out::println);
+        System.out.println();
+    }
+    /** Using recursion to get all files relative path to CWD*/
+    private static void getWorkingDIRFiles(File[] files, SortedSet<String> workingDIRFiles){
+        for (File f : files){
+            if (f.isFile()){
+                workingDIRFiles.add(f.toString().substring(CWD.toString().length(), -1));
+            }else {
+                getWorkingDIRFiles(f.listFiles(), workingDIRFiles);
+            }
+        }
+    }
+    /** Get 2 sortedsets contain files relative name of Modifications Not Staged For Commit
+     *  & Untracked Files respectively*/
+    private static List<SortedSet<String>> iterateWorkingDIRFiles(){
+        Map<String, String> addedFiles = getAddedFiles();
+        SortedSet<String> removedFiles = getRemovedFiles();
+        // get current state blobs
+        Map<String, String> currentBlobs = new TreeMap<>(getHeadCommit().getBlobs());
+        for (Map.Entry<String, String> entry : addedFiles.entrySet()){
+            currentBlobs.put(entry.getKey(), entry.getValue());
+        }
+        for (String removedFile : removedFiles){
+            currentBlobs.remove(removedFile);
+        }
+        // get all files' relative path name in working dir
+        SortedSet<String> workingDIRFiles = new TreeSet<>();
+        getWorkingDIRFiles(CWD.listFiles(file -> {
+            return !file.isHidden() && !file.getName().equals("gitlet");
+        }), workingDIRFiles); // lambda expression for getting workingDIR
+        // iterate over current state blobs
+        SortedSet<String> MNSFC = new TreeSet<>(); //Modifications Not Staged For Commit
+        // the rest of workingDIRFiles is Untracked Files
+        for (Map.Entry<String, String> entry : currentBlobs.entrySet()){
+            String key = entry.getKey(); String value = entry.getValue();
+            if (workingDIRFiles.remove(key)){ // return true if the set contained the specified element
+                File sourceFile = join(CWD, key);
+                String sourceFileID = sha1(readContents(sourceFile));
+                if (sourceFileID != value){ MNSFC.add(key); } // rule 1. 2.
+            }else {
+                MNSFC.add(key); // rule 3. 4.
+            }
+        }
+        List<SortedSet<String>> result = new ArrayList<>();
+        result.add(MNSFC); result.add(workingDIRFiles);
+        return result;
+    }
+    /** Checkout is a kind of general command that can do a few different things
+     * depending on what its arguments are. There are 3 possible use cases. In each
+     * section below, you’ll see 3 numbered points. Each corresponds to the respective
+     * usage of checkout.
+     * Usage:
+     * 1. java gitlet.Main checkout -- [file name]
+     * 2. java gitlet.Main checkout [commit id] -- [file name]
+     * 3. java gitlet.Main checkout [branch name]
+     * Descriptions:
+     * 1. Takes the version of the file as it exists in the head commit and puts it in
+     *    the working directory, overwriting the version of the file that’s already there
+     *    if there is one. The new version of the file is not staged.
+     * 2. Takes the version of the file as it exists in the commit with the given id, and
+     *    puts it in the working directory, overwriting the version of the file that’s
+     *    already there if there is one. The new version of the file is not staged.
+     * 3. Takes all files in the commit at the head of the given branch, and puts them in
+     *    the working directory, overwriting the versions of the files that are already
+     *    there if they exist. Also, at the end of this command, the given branch will
+     *    now be considered the current branch (HEAD). Any files that are tracked in the
+     *    current branch but are not present in the checked-out branch are deleted. The
+     *    staging area is cleared, unless the checked-out branch is the current branch
+     *    (see Failure cases below).*/
+    public static void checkoutFile(String fileName){
+        Commit commit = getHeadCommit();
+        String fileID = commit.getBlobs().get(fileName);
+        if (fileID == null){
+            System.out.println("File does not exist in that commit.");
+            System.exit(0);
+        }
+        File source = join(BLOBS, fileID);
+        File dest = join(CWD, fileName);
+        writeContents(dest, readContents(source));
+
+
+    }
+    public static void checkoutCommitFile(String commitID, String FileName){
+
+    }
+    public static void checkoutBranch(String branchName){
+
+    }
+    /** store commit in specific path using UID */
+    private static void storeNewCommit(Commit newCommit){        
+        String UID = sha1(newCommit);
+        String UIDprefix = UID.substring(0, 2);
+        String UIDsuffix = UID.substring(2,-1);
+        File outFile = join(COMMITS, UIDprefix, UIDsuffix);
+        writeObject(outFile, newCommit);
+        writeContents(HEAD, UID);
+        Map<String, LinkedList<String>> commitsTree = getCommitsTree();
+        if (commitsTree.containsKey(UIDprefix)){
+            commitsTree.get(UIDprefix).add(UIDsuffix);
+        }else {
+            commitsTree.put(UIDprefix, new LinkedList<>(Arrays.asList(UIDsuffix)));
+        }
+    }
+    /** read from my computer the specific commit object */
+    private static Commit getCommit(String commitPath){
+        File inFile = join(COMMITS, commitPath.substring(0, 2), commitPath.substring(2,-1));
+        return readObject(inFile, Commit.class);
+    }
+    /** read from my computer the HEAD commit object */
+    private static Commit getHeadCommit(){
+        String headCommit = readContentsAsString(HEAD);
+        File inFile = join(COMMITS, headCommit.substring(0, 2), headCommit.substring(2,-1));
+        return readObject(inFile, Commit.class);
+    }
+    
+    public static void checkDIR(){
+        if (!GITLET_DIR.exists()){
+            System.out.println("Not in an initialized Gitlet directory.");
+            System.exit(0);
+        }
+    }
+    //Special case: Set correctNum = -1, actualNum = 0 just to print error message
+    public static void checkARGS(int correctNum, int actualNum){
+        if (actualNum != correctNum){
+            System.out.println("Incorrect operands.");
+            System.exit(0);
+        }
+    }
 }

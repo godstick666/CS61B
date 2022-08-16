@@ -2,15 +2,16 @@ package gitlet;
 
 // TODO: any imports you need here
 
-import java.util.Date; // TODO: You'll likely use this in this class
+import java.io.Serializable;
+import java.util.*;
 
 /** Represents a gitlet commit object.
  *  TODO: It's a good idea to give a description here of what else this Class
  *  does at a high level.
  *
- *  @author TODO
+ *  @author Xinpeng WU
  */
-public class Commit {
+public class Commit implements Serializable {
     /**
      * TODO: add instance variables here.
      *
@@ -22,5 +23,29 @@ public class Commit {
     /** The message of this Commit. */
     private String message;
 
-    /* TODO: fill in the rest of this class. */
+    /** The timestamp when committing. */
+    private Date timestamp;
+
+    /** The parent commit of this Commit */
+    private List<String> parents;
+
+    /** The mapping of file names to blob references */
+    private Map<String, String> blobs;
+
+    public Commit (String message, String... parent){
+        this.message = message;
+        this.parents = new LinkedList<>();
+        for (String p : parent){
+            this.parents.add(p);
+        }
+        this.timestamp = parent == null ? new Date(0) : new Date();
+        this.blobs  = new HashMap<>();
+    }
+
+    public String getMessage(){ return this.message; }
+    public Date getTimestamp(){ return this.timestamp; }
+    public List<String> getParents() { return this.parents; }
+    public Map<String, String> getBlobs() { return this.blobs; }
+    public void setBlobs(Map<String, String> Blobs){ this.blobs = Blobs; }
+
 }
