@@ -24,21 +24,24 @@ public class Repository implements Serializable {
      * variable is used. We've provided two examples for you.
      */
 
-    /** The current working directory. */
+    /** The current working dir. */
     public static final File CWD = new File(System.getProperty("user.dir"));
-    /** The .gitlet directory. */
+    /** The .gitlet dir. */
     public static final File GITLET_DIR = join(CWD, ".gitlet");
     /** The staging area in .gitlet */
     public static final File STAGING_AREA = join(GITLET_DIR, "stagingArea");
     public static final File ADDEDFILES = join(GITLET_DIR, ".addedfiles");
     public static final File REMOVEDFILES = join(GITLET_DIR, ".removedfiles");
-    /** The commits stored path */
+    /** The commits object dir */
     public static final File COMMITS = join(GITLET_DIR, "commits");
-    /** The commits' tree */
+    /** The commits' tree file*/
     public static final File COMMITS_TREE = join(COMMITS, "tree");
-    /** The master pointer stored path */
+    /** The currently active pointer file */
     public static final File HEAD = join(GITLET_DIR, "HEAD");
-    /** The blobs stored path */
+    /** The branch pointers dir*/
+    public static final File BRANCHES = join(GITLET_DIR, "branches");
+
+    /** The blobs dir */
     public static final File BLOBS = join(GITLET_DIR, "blobs");
 
     /** Creates a new Gitlet version-control system in the current directory.
@@ -63,6 +66,7 @@ public class Repository implements Serializable {
         GITLET_DIR.mkdir();
         STAGING_AREA.mkdir();
         COMMITS.mkdir();
+        BRANCHES.mkdir();
         BLOBS.mkdir();
         Commit initial = new Commit ("initial commit");
         storeNewCommit(initial);
@@ -75,8 +79,8 @@ public class Repository implements Serializable {
     }
     /** return the set that contains removed files' name */
     private static SortedSet<String> getRemovedFiles(){
-        SortedSet<String> removedFiles = ADDEDFILES.exists() ?
-                readObject(ADDEDFILES, TreeSet.class) : new TreeSet<>();
+        SortedSet<String> removedFiles = REMOVEDFILES.exists() ?
+                readObject(REMOVEDFILES, TreeSet.class) : new TreeSet<>();
         return removedFiles;
     }
     /** return the commit tree that store commitID's prefix and suffix */
@@ -244,9 +248,9 @@ public class Repository implements Serializable {
      * gitlet.Utils that will help you iterate over files within a directory. */
     public static void globalLog(){
         SimpleDateFormat sdf = printLogStyleSet();
-//        for (String commitID : plainFilenamesIn(COMMITS)){
-//            printLogInfo(commitID, getCommit(commitID), sdf);
-//        }
+        //for (String commitID : plainFilenamesIn(COMMITS)){
+        //     printLogInfo(commitID, getCommit(commitID), sdf);
+        //}
         Map<String, LinkedList<String>> commitsTree = getCommitsTree();
         for (Map.Entry<String, LinkedList<String>> entry : commitsTree.entrySet()){
             for (String UIDsuffix : entry.getValue()){
@@ -344,7 +348,7 @@ public class Repository implements Serializable {
             if (workingDIRFiles.remove(key)){ // return true if the set contained the specified element
                 File sourceFile = join(CWD, key);
                 String sourceFileID = sha1(readContents(sourceFile));
-                if (sourceFileID != value){ MNSFC.add(key); } // rule 1. 2.
+                if (!sourceFileID.equals(value)){ MNSFC.add(key); } // rule 1. 2.
             }else {
                 MNSFC.add(key); // rule 3. 4.
             }
@@ -377,6 +381,9 @@ public class Repository implements Serializable {
      *    (see Failure cases below).*/
     public static void checkoutFile(String fileName){
         Commit commit = getHeadCommit();
+        checkoutFile(commit, fileName);
+    }
+    private static void checkoutFile(Commit commit, String fileName){
         String fileID = commit.getBlobs().get(fileName);
         if (fileID == null){
             System.out.println("File does not exist in that commit.");
@@ -385,20 +392,68 @@ public class Repository implements Serializable {
         File source = join(BLOBS, fileID);
         File dest = join(CWD, fileName);
         writeContents(dest, readContents(source));
-
-
+        // remove the staged file if it's there
+        File stagedFile = join(STAGING_AREA, fileID);
+        Map<String, String> addedFiles = getAddedFiles();
+        if (stagedFile.exists()){
+            addedFiles.remove(fileName);
+            restrictedDelete(stagedFile);
+            writeObject(ADDEDFILES, (Serializable) addedFiles);
+        }
     }
-    public static void checkoutCommitFile(String commitID, String FileName){
-
+    public static void checkoutCommitFile(String commitID, String fileName){
+        List<String> suffixes = getCommitsTree().get(commitID.substring(0, 2));
+        for (String suffix : suffixes){
+            if (suffix.substring(0, commitID.length() - 2 ).equals(commitID.substring(2))){
+                checkoutFile(getCommit(commitID), fileName);
+                return;
+            }
+        }
+        System.out.println("No commit with that id exists.");
     }
     public static void checkoutBranch(String branchName){
-
+        File branch = join(BRANCHES, branchName);
+        if (!branch.exists()){
+            System.out.println("No such branch exists.");
+            System.exit(0);
+        }
+        if (re){
+            System.out.println("No need to checkout the current branch.");
+            System.exit(0);
+        }
+    }
+    /** Creates a new branch with the given name, and points it at the current head commit.
+     * A branch is nothing more than a name for a reference (a SHA-1 identifier) to a commit
+     * node. This command does NOT immediately switch to the newly created branch (just as
+     * in real Git). Before you ever call branch, your code should be running with a default
+     * branch called “master”.*/
+    public static void branch(String branchName){
+        File newBranch = join(BRANCHES, branchName);
+        if (newBranch.exists()){
+            System.out.println("A branch with that name already exists.");
+            System.exit(0);
+        }
+        writeContents(newBranch, readContentsAsString(HEAD));
+    }
+    /**  Deletes the branch with the given name. This only means to delete the pointer
+     * associated with the branch; it does not mean to delete all commits that were
+     * created under the branch, or anything like that.*/
+    public static void rmBranch(String branchName){
+        File branch = join(BRANCHES, branchName);
+        if (!branch.exists()){
+            System.out.println("A branch with that name does not exist.");
+            System.exit(0);
+        }
+        // If you try to remove the branch you’re currently on, aborts, printing the error message
+        System.out.println("Cannot remove the current branch.");
+        System.exit(0);
+        restrictedDelete(branch);
     }
     /** store commit in specific path using UID */
     private static void storeNewCommit(Commit newCommit){        
         String UID = sha1(newCommit);
         String UIDprefix = UID.substring(0, 2);
-        String UIDsuffix = UID.substring(2,-1);
+        String UIDsuffix = UID.substring(2); //extends to the end of this string
         File outFile = join(COMMITS, UIDprefix, UIDsuffix);
         writeObject(outFile, newCommit);
         writeContents(HEAD, UID);
@@ -410,14 +465,14 @@ public class Repository implements Serializable {
         }
     }
     /** read from my computer the specific commit object */
-    private static Commit getCommit(String commitPath){
-        File inFile = join(COMMITS, commitPath.substring(0, 2), commitPath.substring(2,-1));
+    private static Commit getCommit(String commitID){
+        File inFile = join(COMMITS, commitID.substring(0, 2), commitID.substring(2));
         return readObject(inFile, Commit.class);
     }
     /** read from my computer the HEAD commit object */
     private static Commit getHeadCommit(){
         String headCommit = readContentsAsString(HEAD);
-        File inFile = join(COMMITS, headCommit.substring(0, 2), headCommit.substring(2,-1));
+        File inFile = join(COMMITS, headCommit.substring(0, 2), headCommit.substring(2));
         return readObject(inFile, Commit.class);
     }
     
