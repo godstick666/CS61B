@@ -74,6 +74,10 @@ public class Main {
                 checkARGS(2, args.length);
                 rmBranch(args[1]);
             }
+            case "reset" ->{
+                checkARGS(2, args.length);
+                reset(args[1]);
+            }
             default -> {
                 System.out.println("No command with that name exists.");
                 System.exit(0);
