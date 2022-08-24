@@ -39,7 +39,7 @@ public class Commit implements Serializable {
             this.parents.add(p);
         }
         this.timestamp = parent == null ? new Date(0) : new Date();
-        this.blobs  = new HashMap<>();
+        this.blobs  = new TreeMap<>();
     }
 
     public String getMessage(){ return this.message; }

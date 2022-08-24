@@ -78,6 +78,10 @@ public class Main {
                 checkARGS(2, args.length);
                 reset(args[1]);
             }
+            case "merge" ->{
+                checkARGS(2, args.length);
+                merge(args[1]);
+            }
             default -> {
                 System.out.println("No command with that name exists.");
                 System.exit(0);

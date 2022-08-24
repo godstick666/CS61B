@@ -6,7 +6,6 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 
 import static gitlet.Utils.*;
-import static gitlet.Utils.readContentsAsString;
 
 // TODO: any imports you need here
 
@@ -17,8 +16,7 @@ import static gitlet.Utils.readContentsAsString;
  *  @author Xinpeng WU
  */
 public class Repository implements Serializable {
-    /**
-     * TODO: add instance variables here.
+    /** TODO: add instance variables here.
      *
      * List all instance variables of the Repository class here with a useful
      * comment above them describing what that variable represents and how that
@@ -41,6 +39,8 @@ public class Repository implements Serializable {
     public static final File HEAD = join(GITLET_DIR, "HEAD");
     /** The branch pointers dir*/
     public static final File BRANCHES = join(GITLET_DIR, "branches");
+    /** The Graph Object */
+    public static final File COMMITSGRAPH = join(GITLET_DIR, "commitsGraph");
 
     /** Creates a new Gitlet version-control system in the current directory.
      *  This system will automatically start with one commit: a commit that contains no files
@@ -69,18 +69,16 @@ public class Repository implements Serializable {
         writeContents(HEAD, "master");
         Commit initial = new Commit ("initial commit");
         storeNewCommit(initial);
+        Graph commitsGraph = new Graph(getHeadCommitID());
+        writeObject(COMMITSGRAPH, commitsGraph);
     }
     /** return the map mapping added files with their hashID */
     private static Map<String, String> getAddedFiles(){
-        Map<String, String> addedFiles = ADDEDFILES.exists() ?
-                readObject(ADDEDFILES, TreeMap.class) : new TreeMap<>();
-        return addedFiles;
+        return ADDEDFILES.exists() ? readObject(ADDEDFILES, TreeMap.class) : new TreeMap<>();
     }
     /** return the set that contains removed files' name */
     private static SortedSet<String> getRemovedFiles(){
-        SortedSet<String> removedFiles = REMOVEDFILES.exists() ?
-                readObject(REMOVEDFILES, TreeSet.class) : new TreeSet<>();
-        return removedFiles;
+        return REMOVEDFILES.exists() ? readObject(REMOVEDFILES, TreeSet.class) : new TreeSet<>();
     }
     /** Adds a copy of the file as it currently exists to the staging area
      * (see the description of the commit command). For this reason, adding
@@ -93,20 +91,20 @@ public class Repository implements Serializable {
      * changed, added, and then changed back to it’s original version). The
      * file will no longer be staged for removal (see gitlet rm), if it was
      * at the time of the command. 
-     * ATTENTION: Significant modification, add addedFiles object to record Relative
-     * Paths file name with its SHA1 ID. */
+     * ATTENTION: Significant modification, add addedFiles object to record
+     * file name with its SHA1 ID. */
     public static void add (String source){
         File sourceFile = join(CWD, source);
         if (!sourceFile.isFile() || !sourceFile.exists()) {
             System.out.println("File does not exist.");
             return;
         }// failure cases
-        byte[] sourceFileContents = readContents(sourceFile);
+        String sourceFileContents = readContentsAsString(sourceFile);
         String sourceFileID = sha1(sourceFileContents);
         String committedFileID = getHeadCommit().getBlobs().get(source);
         Map<String, String> addedFiles = getAddedFiles();
         String stagedFileID = addedFiles.get(source);
-        File stagedFile = join(STAGING_AREA, stagedFileID);
+        File stagedFile = join(STAGING_AREA, source);
         if (sourceFileID.equals(committedFileID)){
             // using SHA1 to determine whether source is identical to current commit file
             if (stagedFile.exists()){
@@ -115,10 +113,8 @@ public class Repository implements Serializable {
                 writeObject(ADDEDFILES, (Serializable) addedFiles);
             }
         }else if (!sourceFileID.equals(stagedFileID)){
-            if (stagedFile.exists()){ restrictedDelete(stagedFile);}
             addedFiles.put(source, sourceFileID);
-            File destFile = join(ADDEDFILES, sourceFileID);
-            writeContents(destFile, sourceFileContents); //copy the file to specific file path
+            writeContents(stagedFile, sourceFileContents); //copy the file to specific file path
             writeObject(ADDEDFILES, (Serializable) addedFiles);
         }
     }
@@ -146,22 +142,26 @@ public class Repository implements Serializable {
         }
         Commit headCommit = getHeadCommit();
         // read from my computer the HEAD commit object and the staging area
-        Commit newCommit = new Commit (message, getHeadCommitID());
+        String parentCommitID = getHeadCommitID();
+        Commit newCommit = new Commit (message, parentCommitID);
         newCommit.setBlobs(new TreeMap<>(headCommit.getBlobs()));
         // clone the HEAD commit's blobs
 
         for (Map.Entry<String, String> entry : addedFiles.entrySet()){
             String key = entry.getKey(); String value = entry.getValue();
             newCommit.getBlobs().put(key, value);
-            File sourceFile = join(STAGING_AREA, value);
+            File sourceFile = join(STAGING_AREA, key);
             File destFile = join(BLOBS, value);
-            writeContents(destFile, readContents(sourceFile));
+            writeContents(destFile, readContentsAsString(sourceFile));
             restrictedDelete(sourceFile);
         }
         for (String removedFile : removedFiles){
             newCommit.getBlobs().remove(removedFile);
         }
         storeNewCommit(newCommit);
+        // update commitsGraph
+        Graph commitsGraph = readObject(COMMITSGRAPH, Graph.class);
+        commitsGraph.addEdge(getHeadCommitID(), parentCommitID);
         restrictedDelete(ADDEDFILES);
         restrictedDelete(REMOVEDFILES);
         // using the staging area to modify the files tracked by new commit
@@ -175,11 +175,10 @@ public class Repository implements Serializable {
         Map<String, String> addedFiles = getAddedFiles();
         SortedSet<String> removedFiles = getRemovedFiles();
         File sourceFile = join(CWD, target);
-        String addedFileID = addedFiles.get(target);
-        if (addedFileID != null) {
+        File addedFile = join(STAGING_AREA, target);
+        if (addedFile.exists()) {
             addedFiles.remove(target);
             writeObject(ADDEDFILES, (Serializable) addedFiles);
-            File addedFile = join(STAGING_AREA, addedFileID);
             restrictedDelete(addedFile);
         }else if (getHeadCommit().getBlobs().containsKey(target)){
             removedFiles.add(target);
@@ -250,18 +249,18 @@ public class Repository implements Serializable {
      *  Failure cases: If no such commit exists, prints the error message Found no commit
      *  with that message.*/
     public static void find(String commitMsg){
-        boolean suchCommitsExit = false;
+        boolean suchCommitsExist = false;
         for (String commitUidPrefix : plainFilenamesIn(COMMITS)){
             for (String commitUidSuffix : plainFilenamesIn(join(COMMITS, commitUidPrefix))){
                 String commitID = commitUidPrefix + commitUidSuffix;
                 Commit commit = getCommit(commitID);
                 if (commit.getMessage().equals(commitMsg)){
                     System.out.println(commitID);
-                    suchCommitsExit = true;
+                    suchCommitsExist = true;
                 }
             }
         }
-        if (suchCommitsExit){
+        if (suchCommitsExist){
             System.out.println("Found no commit with that message.");
         }
     }
@@ -279,11 +278,11 @@ public class Repository implements Serializable {
      *      that may have been introduced, since Gitlet does not deal with them.*/
     public static void status(){
         System.out.println("=== Branches ===");
-        System.out.println("*" + readContentsAsString(HEAD));
-        for(String branch : new TreeSet<>(plainFilenamesIn(BRANCHES))){
-            if (branch.equals("master")) continue;
-            System.out.println(branch);
-        }
+        String currentBranch = readContentsAsString(HEAD);
+        System.out.println("*" + currentBranch);
+        SortedSet<String> branches = new TreeSet<>(plainFilenamesIn(BRANCHES));
+        branches.remove(currentBranch);
+        branches.forEach(System.out::println);
         System.out.println("=== Staged Files ===");
         Map<String, String> addedFiles = getAddedFiles();
         addedFiles.keySet().forEach(System.out::println);
@@ -293,57 +292,47 @@ public class Repository implements Serializable {
         removedFiles.forEach(System.out::println);
         System.out.println();
         System.out.println("=== Modifications Not Staged For Commit ===");
-        List<SortedSet<String>> res = iterateWorkingDIRFiles();
-        res.get(0).forEach(System.out::println);
+        Map<String, String> currentBlobs = getCurrentBlobs();
+        SortedSet<String> cwdFiles = getDirPlainFiles(CWD);
+        List<String> MNSFC = getMNSFC(currentBlobs, cwdFiles);
+        MNSFC.forEach(System.out::println);
         System.out.println();
         System.out.println("=== Untracked Files ===");
-        res.get(1).forEach(System.out::println);
+        cwdFiles.forEach(System.out::println);
         System.out.println();
-    }
-    /** Using recursion to get all files relative path to CWD*/
-    private static void getWorkingDIRFiles(File[] files, SortedSet<String> workingDIRFiles){
-        for (File f : files){
-            if (f.isFile()){
-                workingDIRFiles.add(f.toString().substring(CWD.toString().length(), -1));
-            }else {
-                getWorkingDIRFiles(f.listFiles(), workingDIRFiles);
-            }
-        }
     }
     /** Get 2 sortedsets contain files relative name of Modifications Not Staged For Commit
      *  & Untracked Files respectively*/
-    private static List<SortedSet<String>> iterateWorkingDIRFiles(){
+    private static Map<String, String> getCurrentBlobs(){
         Map<String, String> addedFiles = getAddedFiles();
         SortedSet<String> removedFiles = getRemovedFiles();
         // get current state blobs
         Map<String, String> currentBlobs = new TreeMap<>(getHeadCommit().getBlobs());
-        for (Map.Entry<String, String> entry : addedFiles.entrySet()){
-            currentBlobs.put(entry.getKey(), entry.getValue());
-        }
+        currentBlobs.putAll(addedFiles);
         for (String removedFile : removedFiles){
             currentBlobs.remove(removedFile);
         }
-        // get all files' relative path name in working dir
-        SortedSet<String> workingDIRFiles = new TreeSet<>();
-        getWorkingDIRFiles(CWD.listFiles(file -> {
-            return !file.isHidden() && !file.getName().equals("gitlet");
-        }), workingDIRFiles); // lambda expression for getting workingDIR
-        // iterate over current state blobs
-        SortedSet<String> MNSFC = new TreeSet<>(); //Modifications Not Staged For Commit
-        // the rest of workingDIRFiles is Untracked Files
+        return currentBlobs;
+    }
+    private static SortedSet<String> getDirPlainFiles(File dir){ // natural order
+        List<String> files = plainFilenamesIn(dir);
+        return files != null ? new TreeSet<>(files) : new TreeSet<>();
+    }
+
+    private static List<String> getMNSFC(Map<String, String> currentBlobs, SortedSet<String> cwdFiles){
+        List<String> MNSFC = new ArrayList<>(); //Modifications Not Staged For Commit
+        // iterate over current state blobs, the rest of cwdFiles is Untracked Files
         for (Map.Entry<String, String> entry : currentBlobs.entrySet()){
             String key = entry.getKey(); String value = entry.getValue();
-            if (workingDIRFiles.remove(key)){ // return true if the set contained the specified element
+            if (cwdFiles.remove(key)){ // return true if it contains the specified key
                 File sourceFile = join(CWD, key);
-                String sourceFileID = sha1(readContents(sourceFile));
+                String sourceFileID = sha1(readContentsAsString(sourceFile));
                 if (!sourceFileID.equals(value)){ MNSFC.add(key); } // rule 1. 2.
             }else {
                 MNSFC.add(key); // rule 3. 4.
             }
         }
-        List<SortedSet<String>> result = new ArrayList<>();
-        result.add(MNSFC); result.add(workingDIRFiles);
-        return result;
+        return MNSFC;
     }
     /** Checkout is a kind of general command that can do a few different things
      * depending on what its arguments are. There are 3 possible use cases. In each
@@ -379,27 +368,15 @@ public class Repository implements Serializable {
         }
         File source = join(BLOBS, fileID);
         File dest = join(CWD, fileName);
-        writeContents(dest, readContents(source));
-        // remove the staged file if it's there
-        File stagedFile = join(STAGING_AREA, fileID);
-        Map<String, String> addedFiles = getAddedFiles();
-        if (stagedFile.exists()){
-            addedFiles.remove(fileName);
-            restrictedDelete(stagedFile);
-            writeObject(ADDEDFILES, (Serializable) addedFiles);
-        }
+        writeContents(dest, readContentsAsString(source));
     }
     public static void checkoutCommitFile(String commitID, String fileName){
-        File uidPrefix = join(COMMITS, commitID.substring(0, 2));
-        if (uidPrefix.exists()){
-            for (String uidSuffix : plainFilenamesIn(uidPrefix)){
-                if (uidSuffix.equals(commitID.substring(2))){
-                    checkoutFile(getCommit(commitID), fileName);
-                    return;
-                }
-            }
+        Commit commit = getCommit(commitID);
+        if (commit != null){
+            checkoutFile(commit, fileName);
+        }else {
+            System.out.println("No commit with that id exists.");
         }
-        System.out.println("No commit with that id exists.");
     }
     public static void checkoutBranch(String branchName){
         File branch = join(BRANCHES, branchName);
@@ -411,29 +388,30 @@ public class Repository implements Serializable {
             System.out.println("No need to checkout the current branch.");
             System.exit(0);
         }
-        clearCWDandCopyFilesInSpecificCommit(getCommit(readContentsAsString(branch)));
+        Commit branchCommit = getCommit(readContentsAsString(branch));
+        SortedSet<String> cwdFiles = getDirPlainFiles(CWD);
+        recreateCwdWithCommit(branchCommit.getBlobs(), cwdFiles);
+        for (String untrackedFile : cwdFiles){
+            restrictedDelete(join(CWD, untrackedFile));
+        }
+        deleteDirFiles(STAGING_AREA);
         writeContents(HEAD, branchName);
     }
-    public static void clearCWDandCopyFilesInSpecificCommit(Commit currentCommit){
-        clearFiles(CWD.listFiles(file -> {
-            return !file.isHidden() && !file.getName().equals("gitlet");
-        }));
-        for (Map.Entry<String, String> entry : currentCommit.getBlobs().entrySet()){
-            File source = join(BLOBS, entry.getValue());
-            File dest = join(CWD, entry.getKey());
-            writeContents(dest, readContents(source)); // can not mkdir and create file directly?
+    private static void recreateCwdWithCommit(Map<String, String> currentBlobs, SortedSet<String> cwdFiles){
+        for (Map.Entry<String, String> entry : currentBlobs.entrySet()){
+            String key = entry.getKey(); String value = entry.getValue();
+            File cwdFile = join(CWD, key);
+            if (cwdFiles.remove(key)){
+                String cwdFileId = sha1(readContentsAsString(cwdFile));
+                if (cwdFileId.equals(value)){ continue; }
+            }
+            File source = join(BLOBS, value);
+            writeContents(cwdFile, readContentsAsString(source));
         }
     }
-    private static void clearFiles(File[] dir){
-        for (File f : dir){
-            if (f.isFile()){
-                restrictedDelete(f);
-            }else if (f.isDirectory() && f.list().length == 0){
-                f.delete();
-            }else {
-                clearFiles(f.listFiles());
-                f.delete();
-            }
+    private static void deleteDirFiles(File dir){
+        for (String fileName : getDirPlainFiles(dir)){
+            restrictedDelete(join(dir, fileName));
         }
     }
     /** Creates a new branch with the given name, and points it at the current head commit.
@@ -476,37 +454,137 @@ public class Repository implements Serializable {
      *  it, or add and commit it first.` and exit; perform this check before doing
      *  anything else.*/
     public static void reset(String commitID){
-        File inFile = join(COMMITS, commitID.substring(0, 2));
-        Commit commit = null; String commitRealID = null;
-        for (File f : inFile.listFiles()){
-            if (f.getName().startsWith(commitID.substring(2))){
-                commit = readObject(inFile, Commit.class);
-                commitRealID = commitID.substring(0, 2) + f.getName();
-            }
-        }
+        commitID = getCommitID(commitID);
+        Commit commit = getCommit(commitID);
         if (commit == null){
             System.out.println("No commit with that id exists.");System.exit(0);
         }
-        if (!getUntrackedFiles(commit).isEmpty()){
+        SortedSet<String> cwdFiles = getDirPlainFiles(CWD);
+        if (!getUntrackFiles(commit.getBlobs(), cwdFiles).isEmpty()){
             System.out.println("There is an untracked file in the way; delete it, or add and commit it first.");
             System.exit(0);
         }
-        clearCWDandCopyFilesInSpecificCommit(commit);
-        writeContents(join(BRANCHES, readContentsAsString(HEAD)), commitRealID);
-        clearFiles(STAGING_AREA.listFiles());
+        recreateCwdWithCommit(commit.getBlobs(), cwdFiles);
+        writeContents(join(BRANCHES, readContentsAsString(HEAD)), commitID);
+        deleteDirFiles(STAGING_AREA);
     }
-    private static SortedSet<String> getUntrackedFiles(Commit commit){
-        SortedSet<String> workingDIRFiles = new TreeSet<>();
-        getWorkingDIRFiles(CWD.listFiles(file -> {
-            return !file.isHidden() && !file.getName().equals("gitlet");
-        }), workingDIRFiles);
-        for(Map.Entry<String, String> entry : commit.getBlobs().entrySet()){
-            workingDIRFiles.remove(entry.getKey());
+    private static List<String> getUntrackFiles(Map<String, String> currentBlobs, SortedSet<String> cwdFiles){
+        List<String> untrackedFiles = new ArrayList<>();
+        for(String file : cwdFiles){
+            if (currentBlobs.get(file) == null){
+                untrackedFiles.add(file);
+            }
         }
-        return workingDIRFiles;
+        return untrackedFiles;
     }
+    /** */
+    public static void merge(String givenBranchName){
+        if (getAddedFiles().isEmpty() && getRemovedFiles().isEmpty()){
+            System.out.println("You have uncommitted changes.");
+            System.exit(0);
+        }
+        if (!join(BRANCHES, givenBranchName).exists()){
+            System.out.println("A branch with that name does not exist.");
+            System.exit(0);
+        }
+        String givenBranchID = readContentsAsString(join(BRANCHES, givenBranchName));
+        String currentBranchID = getHeadCommitID();
+        if (givenBranchID.equals(currentBranchID)){
+            System.out.println("Cannot merge a branch with itself.");
+            System.exit(0);
+        }
+        Map<String, String> currentBranchCommitBlobs = new TreeMap<>(getCommit(currentBranchID).getBlobs());
+        SortedSet<String> cwdFiles = getDirPlainFiles(CWD);
+        if (!getUntrackFiles(currentBranchCommitBlobs, cwdFiles).isEmpty()){
+            System.out.println("There is an untracked file in the way; delete it, or add and commit it first.");
+            System.exit(0);
+        } // failure cases
+        Graph commitsGraph = readObject(COMMITSGRAPH, Graph.class);
+        String splitPointID = commitsGraph.getSplitPointID(givenBranchID, currentBranchID);
+        // get split point
+        if (splitPointID.equals(givenBranchID)){
+            System.out.println("Given branch is an ancestor of the current branch.");
+        }else if (splitPointID.equals(currentBranchID)){
+            System.out.println("Current branch fast-forwarded.");
+        }else {
+            String message = String.format("Merged %s into %s.", givenBranchName, readContentsAsString(HEAD));
+            Commit newCommit = new Commit(message, currentBranchID, givenBranchID);
+            newCommit.setBlobs(new TreeMap<>(currentBranchCommitBlobs));
+            Map<String, String> givenBranchCommitBlobs = new TreeMap<>(getCommit(givenBranchID).getBlobs());
+            Map<String, String> splitPointCommitBlobs = new TreeMap<>(getCommit(splitPointID).getBlobs());
+            for (Map.Entry<String, String> entry : currentBranchCommitBlobs.entrySet()){
+                String currentBranchCommitFileName = entry.getKey();
+                String currentBranchCommitFileID = entry.getValue();
+                String givenBranchCommitFileID = givenBranchCommitBlobs.remove(currentBranchCommitFileName);
+                String splitPointCommitFileID = splitPointCommitBlobs.get(currentBranchCommitFileName);
+                if (!currentBranchCommitFileID.equals(givenBranchCommitFileID)){ //3
+                    if (givenBranchCommitFileID == null){
+                        if (currentBranchCommitFileID.equals(splitPointCommitFileID)){ //6
+                            newCommit.getBlobs().remove(currentBranchCommitFileName);
+                        }else if (splitPointCommitFileID != null){ //8
+                            String mergedFileID = mergeConflict(currentBranchCommitFileID, null);//mergeConflict()
+                            newCommit.getBlobs().put(currentBranchCommitFileName, mergedFileID);
+                        } //4
+                    }else {
+                        if (currentBranchCommitFileID.equals(splitPointCommitFileID)){ //1
+                            newCommit.getBlobs().put(currentBranchCommitFileName, givenBranchCommitFileID);
+                        }else if (splitPointCommitFileID == null){
+                            String mergedFileID = mergeConflict(currentBranchCommitFileID, givenBranchCommitFileID);//mergeConflict()
+                            newCommit.getBlobs().put(currentBranchCommitFileName, mergedFileID);
+                        } //2
+                    }
+                }
+            }
+            for (Map.Entry<String, String> entry : givenBranchCommitBlobs.entrySet()){
+                String givenBranchCommitFileName = entry.getKey();
+                String givenBranchCommitFileID = entry.getValue();
+                String splitPointCommitFileID = splitPointCommitBlobs.get(givenBranchCommitFileName);
+                if (!givenBranchCommitFileID.equals(splitPointCommitFileID)){ //7
+                    if (splitPointCommitFileID == null){ //5
+                        newCommit.getBlobs().put(givenBranchCommitFileName, givenBranchCommitFileID);
+                    }else {
+                        String mergedFileID = mergeConflict(null, givenBranchCommitFileID); //mergeConflict()
+                        newCommit.getBlobs().put(givenBranchCommitFileName, mergedFileID);
+                    }
+                }
+            }
+            recreateCwdWithCommit(newCommit.getBlobs(), cwdFiles);
+            storeNewCommit(newCommit);
+            // GC: givenBranchCommitID, CC: currentBranchCommitID, SC: splitPointCommitID
+            // GF: givenBranchCommitBlobsFileID, CF: currentBranchCommitFile, SF: splitPointCommitFile
+            // 1. if GF != SF && CF == SF. Checkout and staged GF
+            // 2. if CF != SF && GF == SF. -
+            // 3. if ((!CF.exist() && !GF.exist()) || CF == GF) && CF,GF != SF. -
+            // 4. if CF.exist() && !SF.exist(). -
+            // 5. if GF.exist() && !SF.exist(). Checkout and staged GF
+            // 6. if SF.exist() && CF == SF && !GF.exist(). Removed and untracked GF
+            // 7. if SF.exist() && GF == SF && !CF.exist(). -
+            // storeNewCommit()
+            // sout("Merged [given branch name] into [current branch name].")
+            // 8. if GF != CF != SF (maybe someone not exist). replace the contents of the conflicted file with
+            // writecontents(file, <<<<<<< HEAD
+            //contents of file in current branch
+            //=======
+            //contents of file in given branch
+            //>>>>>>>)
+            // sout("Encountered a merge conflict.")
+        }
+    }
+    private static String mergeConflict(String currentBranchFileID, String givenBranchFileID){
+        System.out.println("Encountered a merge conflict.");
+        String currentBranchFileContents = currentBranchFileID == null ? ""
+                : readContentsAsString(join(BLOBS, currentBranchFileID));
+        String givenBranchFileContents = givenBranchFileID == null ? ""
+                : readContentsAsString(join(BLOBS, givenBranchFileID));
+        String mergedFileContents= "<<<<<<< HEAD" + '\n' + currentBranchFileContents
+                + "=======" + '\n' + givenBranchFileContents + ">>>>>>>";
+        String mergedFileID = sha1(mergedFileContents);
+        writeContents(join(BLOBS, mergedFileID), mergedFileContents);
+        return mergedFileID;
+    }
+
     /** store commit in specific path using UID */
-    private static void storeNewCommit(Commit newCommit){        
+    private static void storeNewCommit(Commit newCommit){
         String UID = sha1(newCommit);
         File outFile = join(COMMITS, UID.substring(0, 2), UID.substring(2));
         writeObject(outFile, newCommit);
@@ -523,9 +601,10 @@ public class Repository implements Serializable {
     private static String getCommitID(String shortenedID){
         if (shortenedID.length() < 4) { System.exit(0); } //like real git except throwing error message
         File uidPrefix = join(COMMITS, shortenedID.substring(0, 2));
-        for (File uidSuffix : uidPrefix.listFiles()){
-            if (uidSuffix.getName().startsWith(shortenedID.substring(2))){
-                return uidPrefix.getName() + uidSuffix.getName();
+        if (!uidPrefix.exists()) { return null; }
+        for (String uidSuffix : plainFilenamesIn(uidPrefix)){
+            if (uidSuffix.startsWith(shortenedID.substring(2))){
+                return uidPrefix.getName() + uidSuffix;
             }
         }
         return null;

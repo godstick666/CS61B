@@ -26,16 +26,30 @@
 5. WARNING: log() -- something warning about corporation with Help methods 1.2. Start with head commit, following the first parent commit links, print commit's ID, timestamp and message. 
 6. TOBEIMPROVED: globalLog() -- Iterate over all commit objects.
 7. TOBEIMPROVED: find(String commitMsg) -- Iterate over all commit objects.
-8. status() -- Displays 5 categories: branches, files staged for addition and removal, modified but not staged files and untracked Files. **Natural ordering implementation: new TreeSet(collection); collection.sort(null). Method reference: .forEach(System.out::println).**
-9.
-##### Help Methods
-1. getCommitID(String shortenedID) -- return complete commit ID with shortened ID input, the commit object is stored in COMMITS/commitID.substring(0, 2)/commitID.substring(2) so that we can locate the object using shortened UID.
-2. getCommit(String commitID) -- return the specific commit object using commitID(maybe a shortened one)
-3. getHeadCommitID() -- get HEAD commitID
-4. getHeadCommit() -- get HEAD commit object
-5. storeNewCommit(Commit newCommit) -- store the new commit in COMMITS dir and update the branch pointer.
-6. printLogStyleSet() -- return a SimpleDateFormat object representing specific print format.
-7. printLogInfo(String commitID, Commit commit, SimpleDateFormat sdf) -- print commitID, plus 2 parents' commitID for merged commit, timestamp of commit using sdf and commit message.
+8. status() -- Displays 5 categories: branches, files staged for addition and removal, modified but not staged files and untracked Files. **Natural ordering implementation: new TreeSet(collection); collection.sort(null). Method reference: .forEach(System.out::println).** 
+9. checkoutFile(String fileName) -- Checkout the file of head commit, not staged it.
+10. checkoutCommitFile(String commitID, String fileName) -- Similar to 9.
+11. checkoutBranch(String branchName) -- Checkout all the files of new branch, remove all the untracked files in current branch.
+12. branch(String branchName) -- Create a new branch, point it to head commit.
+13. rmBranch(String branchName) -- Delete the specific branch (just the pointer associated with the branch)
+14. reset(String commitID) -- Checkout the file of specific commit
+
+##### Help Methods (Usage Frequency in different public method) 
+1. (1)getCommitID(String shortenedID) -- return complete commit ID with shortened ID input, the commit object is stored in COMMITS/commitID.substring(0, 2)/commitID.substring(2) so that we can locate the object using shortened UID.
+2. (6)getCommit(String commitID) -- return the specific commit object using commitID(maybe a shortened one)
+3. (3)getHeadCommitID() -- get HEAD commitID
+4. (5)getHeadCommit() -- get HEAD commit object
+5. (2)storeNewCommit(Commit newCommit) -- store the new commit in COMMITS dir and update the branch pointer.
+6. (2)printLogStyleSet() -- return a SimpleDateFormat object representing specific print format.
+7. (2)printLogInfo(String commitID, Commit commit, SimpleDateFormat sdf) -- print commitID, plus 2 parents' commitID for merged commit, timestamp of commit using sdf and commit message.
+8. (1)getCurrentBlobs() -- return current state blobs which is a Map<String, String> object
+9. (3)getDirPlainFiles() -- return SortedSet<String> object of plain files with specific dir
+10. (1)TOBEIMPROVED: getMNSFC(Map<String, String> currentBlobs, SortedSet<String> cwdFiles) -- iterate over current state blobs, return MNSFC List<String> (sorted) object, the rest of cwdFiles is Untracked Files
+11. (2)checkoutFile(Commit commit, String fileName) -- Core method of checkout(). Put commit version file into cwd and do not stage it.
+12. (2)TOBEIMPROVED: recreateCwdWithCommit(Map<String, String> currentBlobs, SortedSet<String> cwdFiles) -- Fill the cwd with files of specific commit, the rest of cwdFiles is Untracked Files.
+13. (2)deleteDirFiles(File dir) -- Delete plain files in specific dir
+14. (1)getUntrackFiles(Map<String, String> currentBlobs, SortedSet<String> cwdFiles) -- return List<String> object of untracked files.
+
 ##### ErrorDetect Methods
 1. checkDIR() -- check if cwd contains .gitlet dir
 2. checkARGS(int correctNum, int actualNum) -- check if the number of OPERANDS is correct. Plus, for special case, set correctNum = -1, actualNum = 0 just to print error message.
