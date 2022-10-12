@@ -14,9 +14,7 @@ import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import java.util.Formatter;
-import java.util.List;
+import java.util.*;
 
 
 /** Assorted utilities.
@@ -70,16 +68,21 @@ class Utils {
      *  and throws IllegalArgumentException unless the directory designated by
      *  FILE also contains a directory named .gitlet. */
     static boolean restrictedDelete(File file) {
-        if (!(new File(file.getParentFile(), ".gitlet")).isDirectory()) {
-            throw new IllegalArgumentException("not .gitlet working directory");
-        }
-        if (!file.isDirectory()) {
+//        if (!(new File(file.getParentFile(), ".gitlet")).isDirectory()) {
+//            throw new IllegalArgumentException("not .gitlet working directory");
+//        }
+        if (file.exists() && !file.isDirectory()) {
             return file.delete();
         } else {
             return false;
         }
     }
-
+    /** Deletes all files in specified dir */
+    static void restrictedDeleteFilesInDir(File dir){
+        for (String fileName : plainFilenamesIn(dir)){
+            restrictedDelete(join(dir, fileName));
+        }
+    }
     /** Deletes the file named FILE if it exists and is not a directory.
      *  Returns true if FILE was deleted, and false otherwise.  Refuses
      *  to delete FILE and throws IllegalArgumentException unless the
@@ -171,20 +174,20 @@ class Utils {
     /** Returns a list of the names of all plain files in the directory DIR, in
      *  lexicographic order as Java Strings.  Returns null if DIR does
      *  not denote a directory. */
-    static List<String> plainFilenamesIn(File dir) {
+    // modify not to return null and from list to set
+    static SortedSet<String> plainFilenamesIn(File dir) {
         String[] files = dir.list(PLAIN_FILES);
         if (files == null) {
-            return null;
+            return new TreeSet<>();
         } else {
-            Arrays.sort(files);
-            return Arrays.asList(files);
+            return new TreeSet<>(Arrays.asList(files));
         }
     }
 
     /** Returns a list of the names of all plain files in the directory DIR, in
      *  lexicographic order as Java Strings.  Returns null if DIR does
      *  not denote a directory. */
-    static List<String> plainFilenamesIn(String dir) {
+    static SortedSet<String> plainFilenamesIn(String dir) {
         return plainFilenamesIn(new File(dir));
     }
 

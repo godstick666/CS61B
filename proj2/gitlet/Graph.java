@@ -15,10 +15,10 @@ public class Graph implements Serializable { // directed graph
     public void addEdge(String newCommit, String pastCommit){ // pastCommit point to newCommit
         int w = labels.get(pastCommit);
         int v = updateLabels(newCommit);
-        adjList.get(w).add(v);
-        if (adjList.size() < v){
+        while (adjList.size() - 1 < v){
             adjList.add(new ArrayList<>());
         }
+        adjList.get(w).add(v);
     }
     private int updateLabels(String s){
         Integer v = labels.get(s);
@@ -33,7 +33,7 @@ public class Graph implements Serializable { // directed graph
         return adjList.get(v);
     }
     public int V(){
-        return adjList.size();
+        return labels.size();
     }
     /** get ShortestPathTree rooted with initial commit */
     public String getSplitPointID(String id1, String id2){
@@ -47,7 +47,7 @@ public class Graph implements Serializable { // directed graph
                 return getIdUsingLabels(i - 1);
             }
         }
-        return getIdUsingLabels(minLength - 1);
+        return getIdUsingLabels(path1.charAt(minLength - 1));
     }
     private String getIdUsingLabels(int label){
         for (Map.Entry<String, Integer> entry : labels.entrySet()){
